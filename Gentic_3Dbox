@@ -1,0 +1,445 @@
+import time
+import random
+from math import floor
+import numpy as np
+from collections import Counter
+from matplotlib import pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+#设置图表刻度等格式
+from matplotlib.ticker import MultipleLocator
+
+import warnings
+warnings.filterwarnings("ignore")
+
+
+#根据图显需要的数据，把尺寸数据生成绘图数据的函数
+def transformtoplot(O,C,color):
+    data = [O[0],O[1],O[2],C[0],C[1],C[2],color]
+    return data
+
+
+def box(ax,x, y, z, dx, dy, dz, color='red'):
+    xx = [x, x, x+dx, x+dx, x]
+    yy = [y, y+dy, y+dy, y, y]
+    kwargs = {'alpha': 1, 'color': color}
+    ax.plot3D(xx, yy, [z]*5, **kwargs)#下底
+    ax.plot3D(xx, yy, [z+dz]*5, **kwargs)#上底
+    ax.plot3D([x, x], [y, y], [z, z+dz], **kwargs)
+    ax.plot3D([x, x], [y+dy, y+dy], [z, z+dz], **kwargs)
+    ax.plot3D([x+dx, x+dx], [y+dy, y+dy], [z, z+dz], **kwargs)
+    ax.plot3D([x+dx, x+dx], [y, y], [z, z+dz], **kwargs)
+    return ax
+
+
+def make_pic(Items, path):
+    fig = plt.figure()
+    ax = Axes3D(fig)
+    ax.xaxis.set_major_locator(MultipleLocator(50))
+    ax.yaxis.set_major_locator(MultipleLocator(50))
+    ax.zaxis.set_major_locator(MultipleLocator(50))
+    for num in Items:
+        box(ax,num[0],num[1],num[2],num[3],num[4],num[5],num[6])
+    plt.title('Cube')
+    # plt.show()
+    plt.savefig(path)
+
+
+def edge(Q, D, BigSet):
+    if D == 1:
+        return [BigSet[Q-1][0], BigSet[Q-1][1], BigSet[Q-1][2]]
+    elif D == 2:
+        return [BigSet[Q-1][1], BigSet[Q-1][0], BigSet[Q-1][2]]
+    elif D == 3:
+        return [BigSet[Q-1][2], BigSet[Q-1][1], BigSet[Q-1][0]]
+    elif D == 4:
+        return [BigSet[Q-1][1], BigSet[Q-1][2], BigSet[Q-1][0]]
+    elif D == 5:
+        return [BigSet[Q-1][2], BigSet[Q-1][0], BigSet[Q-1][1]]
+    elif D == 6:
+        return [BigSet[Q-1][0], BigSet[Q-1][2], BigSet[Q-1][1]]
+
+
+def box_intersect_judge(Point, E, placedbox, position, full_Q, full_D, Box):
+    # 假设放置 得到x y z 的覆盖区间
+    x_region = [Point[0], Point[0] + E[0]]
+    y_region = [Point[1], Point[1] + E[1]]
+    z_region = [Point[2], Point[2] + E[2]]
+
+    if len(position) == 0:
+        return False
+
+    for i, eachpos in enumerate(position):
+        # 判断 eachpos 和 假设放置区间是否相交
+        # 首先需要取出 eachpos 的三区间
+        index = placedbox[i] # 放置的箱子的QD下标
+        eachE = edge(full_Q[index], full_D[index], Box)
+        each_x_region = [position[i][0], position[i][0] + eachE[0]]
+        each_y_region = [position[i][1], position[i][1] + eachE[1]]
+        each_z_region = [position[i][2], position[i][2] + eachE[2]]
+
+        flags = []
+        # 开始判断区间是否相交
+        if x_region[0] != each_x_region[0]:
+            if x_region[0] < each_x_region[0]:
+                if x_region[1] <= each_x_region[0]:
+                    flags.append(True)
+                else:
+                    flags.append(False)
+            if each_x_region[0] < x_region[0]:
+                if each_x_region[1] <= x_region[0]:
+                    flags.append(True)
+                else:
+                    flags.append(False)
+        else:
+            flags.append(False)
+
+        if y_region[0] != each_y_region[0]:
+            if y_region[0] < each_y_region[0]:
+                if y_region[1] <= each_y_region[0]:
+                    flags.append(True)
+                else:
+                    flags.append(False)
+            if each_y_region[0] < y_region[0]:
+                if each_y_region[1] <= y_region[0]:
+                    flags.append(True)
+                else:
+                    flags.append(False)
+        else:
+            flags.append(False)
+
+        if z_region[0] != each_z_region[0]:
+            if z_region[0] < each_z_region[0]:
+                if z_region[1] <= each_z_region[0]:
+                    flags.append(True)
+                else:
+                    flags.append(False)
+            if each_z_region[0] < z_region[0]:
+                if each_z_region[1] <= z_region[0]:
+                    flags.append(True)
+                else:
+                    flags.append(False)
+        else:
+            flags.append(False)
+
+        if flags[0] == False and flags[1] == False and flags[2] == False:
+            return True
+
+    return False
+
+
+
+def placement_box(Q, D, PointSet, xscale, yscale, zscale, Box, placedbox, position, full_Q, full_D):  # 此处的Q和D是一个摆放数字和方向数字
+    new_point = []
+    i = 0
+    box_useful = False
+    box_pos = None
+    point_used = None
+
+    M1 = min([x[0] for x in Box])
+    M2 = min([x[1] for x in Box])
+    M3 = min([x[2] for x in Box])
+    boxsizeMin = min([M1, M2, M3])
+
+    while i < len(PointSet): # PointSet是现有的可用点 该循环的目的是 充分尝试所有可用点 直到让当前箱子Q在方向D上可以在该可用点进行摆放
+        # 根据当前方向调整箱子的长宽高
+        E = edge(Q, D, Box)
+
+        # 判断可用点的第一个条件： 在该可用点上摆放之后，不能超过大箱子的边缘
+        if PointSet[i][0] + E[0] <= xscale and PointSet[i][1] + E[1] <= yscale and PointSet[i][2] + E[2] <= zscale:
+
+            # # 加一个条件 如果该可行点放置之后 剩下的都不好放了 那也不要这个可行点算了
+            # if xscale - (PointSet[i][0] + E[0]) < boxsizeMin \
+            #     or yscale - (PointSet[i][1] + E[1]) < boxsizeMin \
+            #        or zscale - (PointSet[i][2] + E[2]) < boxsizeMin:
+            #     i = i + 1
+            #     continue
+
+            # 判断 如果该箱子在该可用点上放置了 会不会和别的箱子发生相交 判断方法为 假设箱子Q在该可用点上放置 再来判断放置之后是否会与其他箱子相交
+            flag = box_intersect_judge(PointSet[i], E, placedbox, position, full_Q, full_D, Box)
+            if flag == True:  # 如果与其他箱子相交了 那么这个可用点也是不可以用的
+                i = i + 1
+                continue
+            else:   # 没有与其他箱子相交 也满足不超过边缘的条件 那么这个可用点就和这个箱子匹配上了
+                box_useful = True
+                box_pos = PointSet[i]
+                point_used = PointSet[i]
+                new_point.append([PointSet[i][0] + E[0], PointSet[i][1], PointSet[i][2]])
+                new_point.append([PointSet[i][0], PointSet[i][1] + E[1], PointSet[i][2]])
+                new_point.append([PointSet[i][0], PointSet[i][1], PointSet[i][2] + E[2]])
+                break
+        i = i + 1
+
+    if i == len(PointSet):  # 这代表寻找可行点失败了 那么这个箱子就无法被放入到这个大箱子当中了已经
+        box_useful = False
+
+    return box_useful, box_pos, point_used, new_point
+
+
+
+def placement_array(Q, D, xscale, yscale, zscale, Box): # 此处的Q和D是一个摆放序列和方向序列
+    placedbox = []
+    position = []
+    BoxNum = 0
+    V = 0
+    PointSet = [[0,0,0]]
+    usecount = [Box[j][3] for j in range(len(Box))]
+
+    for i in range(len(Q)):   # 对序列当中的每个箱子进行尝试放置
+        box_useful, box_pos, point_used, new_point = placement_box(Q[i], D[i], PointSet, xscale, yscale, zscale, Box, placedbox, position, Q, D)
+        # 不仅仅需要box_useful可行 还要满足当前各种箱子还有得用
+        if box_useful and usecount[Q[i]-1] > 0:
+            placedbox.append(i)
+            position.append(box_pos)
+            PointSet.remove(point_used)
+            V += Box[Q[i]-1][4]
+            for new in new_point:
+                PointSet.append(new)
+            usecount[Q[i]-1] = usecount[Q[i]-1] - 1
+
+    BoxNum = len(placedbox)
+
+    return placedbox, position, BoxNum, V
+
+
+def Select(Q, D, position, BoxNum, V, placedbox, populations):
+    # 选择函数
+    result_Q = []
+    result_D = []
+    result_position = []
+    result_BoxNum = []
+    result_V = []
+    result_placedbox = []
+    for num in range(populations):
+        max_value = max(V)
+        max_index = V.index(max_value)
+        result_Q.append(Q[max_index])
+        result_D.append(D[max_index])
+        result_position.append(position[max_index])
+        result_BoxNum.append(BoxNum[max_index])
+        result_V.append(V[max_index])
+        result_placedbox.append(placedbox[max_index])
+        del V[max_index]
+        del Q[max_index]
+        del D[max_index]
+        del position[max_index]
+        del BoxNum[max_index]
+        del placedbox[max_index]
+    return result_Q, result_D, result_position, result_BoxNum, result_V, result_placedbox
+
+def aberrance(Q, D, populations, rate, placedBox, Box):
+
+    knotNum = int(len(Q[0]) * rate)
+    # 选出需要变异的序列 个数为int(populations * rate // 2)
+    aber = random.sample(range(populations),populations)
+    aber = aber[0:int(populations * rate)]
+
+    for i in aber:
+        temp = random.sample(placedBox[i],len(placedBox[i]))
+        temp = temp[0:knotNum]  # i序列当中需要变异的位置
+        tempQ = Q[i]
+
+        # 统计i序列中每种箱子出现的次数
+        icount = Counter(tempQ)
+        icount = dict(icount)
+
+        # m = icount.keys()
+        # box_kind = []
+        # for key in m:
+        #     box_kind.append(key)
+        #
+        # for index in temp:
+        #     tmp = random.randint(1, len(box_kind))
+        #     while tempQ[index] == tmp:
+        #         tmp = random.randint(1, len(box_kind))
+        #     tempQ[index] = tmp
+
+        # 考虑所有箱子数量平衡的方法
+        for r in temp:
+            icount[tempQ[r]] = icount[tempQ[r]] - 1
+        usecount = [Box[j][3] for j in range(len(Box))]
+        for key in icount.keys():
+            usecount[key-1] = usecount[key-1] - icount[key]
+
+        # 从可用表中获取多个箱子
+        Permuta = []
+        for b in range(len(usecount)):
+            if usecount[b] == 0:
+                continue
+            for num in range(usecount[b]):
+                Permuta.append(b+1)
+        changebox = random.sample(Permuta,len(temp))
+        for r in range(len(temp)):
+            tempQ[temp[r]] = changebox[r]
+
+        tempD = D[i]
+        for r in temp:
+            tempD[r] = random.randint(1, 1)
+
+        Q.append(tempQ)
+        D.append(tempD)
+
+    return Q, D
+
+
+def Combination(Q, D, BoxNum, populations, rate):
+    male = random.sample(range(populations),populations)
+    male = male[0:int(populations * rate)]
+    female = []
+    for g in range(len(male)):
+        tmp = floor(random.random() * populations)
+        while male[g] == tmp:
+            tmp = floor(random.random() * populations)
+        female.append(tmp)
+
+        k = floor(len(Q[0]) / 5 * 3)
+        Q1 = Q[male[g]][0:k+1] + Q[female[g]][k+1:]
+        Q2 = Q[female[g]][0:k+1] + Q[male[g]][k+1:]
+        D1 = D[male[g]][0:k+1] + D[female[g]][k+1:]
+        D2 = D[female[g]][0:k+1] + D[male[g]][k+1:]
+
+        Q.append(Q1)
+        D.append(D1)
+        Q.append(Q2)
+        D.append(D2)
+
+    return Q, D
+
+
+def packing(Box, xscale, yscale, zscale):
+
+    rateCom = 0.7  # 结合概率
+    rateAbe = 0.1  # 变异概率
+    populations = 50  # 种群大小
+    Maxtime = 2000  # 最大迭代时间
+
+    # 将体积属性加入到Box列表当中
+    V_list = []
+    for i in range(len(Box)):
+        box_v = Box[i][0] * Box[i][1] * Box[i][2]
+        V_list.append(box_v)
+        Box[i].append(box_v)
+
+    # 创建箱子编号序列
+    BoxPermu = []
+    for g in range(len(Box)):
+        for num in range(Box[g][3]):
+            BoxPermu.append(g + 1)
+    tempBoxPerms = []
+    for q in range(10 * populations):
+        random_index = random.sample(range(len(BoxPermu)), len(BoxPermu))
+        tmp = []
+        for index in random_index:
+            tmp.append(BoxPermu[index])
+        tempBoxPerms.append(tmp)
+    BoxPermu = tempBoxPerms  # 生成一个10倍人口的箱子序列
+
+    # 初始化 Q和D
+    Q = np.zeros((2 * populations, len(BoxPermu[0])), dtype=int).tolist()
+    D = np.zeros((2 * populations, len(BoxPermu[0])), dtype=int).tolist()
+    for k in range(2 * populations):  # 从10倍人口选取2倍人口出来 作为遗传算法的起点
+        Q[k] = BoxPermu[floor(random.random() * len(BoxPermu))]
+        # D[k] = [random.randint(1, 6) for _ in range(len(BoxPermu[0]))]
+        D[k] = [random.randint(1, 1) for _ in range(len(BoxPermu[0]))]
+
+    # 对一个序列执行放置操作 首先初始化变量
+    positions = []   # 记录每种序列每个成功放置的箱子都放在了哪里
+    placedboxs = []  # 记录每种序列有哪几号箱子被成功放置了
+    BoxNums = []  # 记录每种序列有几个箱子被成功放置
+    Vs = []   # 记录每种序列的箱子总体积
+
+    # 对种群中的每个序列进行放置
+    for i in range(2 * populations):
+        placedbox, position, BoxNum, V = placement_array(Q[i], D[i], xscale, yscale, zscale, Box)
+        placedboxs.append(placedbox)
+        positions.append(position)
+        BoxNums.append(BoxNum)
+        Vs.append(V)
+
+    # 进行第一次选择， 从两倍人口选出最优的1倍人口的序列们
+    Q, D, positions, BoxNums, Vs, placedboxs = Select(Q, D, positions, BoxNums, Vs, placedboxs, populations)
+
+    for time in range(Maxtime):
+        # 交叉
+        Q, D = Combination(Q, D, BoxNums, populations, rateCom)  # 交叉出来的序列不一定合法
+        # 变异
+        Q, D = aberrance(Q, D, populations, rateAbe, placedboxs, Box)
+        # 填充
+        # 对一个序列执行放置操作 首先初始化变量
+        for i in range(len(Q)-populations):
+            placedbox, position, BoxNum, V = placement_array(Q[i+populations], D[i+populations], xscale, yscale, zscale, Box)
+            placedboxs.append(placedbox)
+            positions.append(position)
+            BoxNums.append(BoxNum)
+            Vs.append(V)
+        # 选择
+        Q, D, positions, BoxNums, Vs, placedboxs = Select(Q, D, positions, BoxNums, Vs, placedboxs, populations)
+        print("当前为第{}次迭代，最大空间填充率为{}".format(time,(max(Vs))/(xscale * yscale * zscale)))
+        print(Vs)
+
+    max_v_value = max(Vs)
+    max_v_index = Vs.index(max_v_value)
+    solutionQ = Q[max_v_index]
+    solutionD = D[max_v_index]
+    solutionV = Vs[max_v_index]
+    solutionPosition = positions[max_v_index]
+    solutionplacedboxs = placedboxs[max_v_index]
+
+    return solutionQ, solutionD, solutionV, solutionPosition, solutionplacedboxs
+
+
+if __name__=='__main__':
+    total_time = 0
+    total_count = 0
+    color_list = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'grey', 'pink', 'DarkBlue', 'LightGreen',
+                  'Gold', 'Tan', 'Brown', 'Silver', 'Thistle']
+    BoxSet = {3:[[[108,76,30,40],[110,43,25,33],[92,81,55,39]],
+                [[91,54,45,32],[105,77,72,24],[79,78,48,30]],
+                [[60,40,32,64],[98,75,55,40],[60,59,39,64]],
+                [[78,37,27,63],[89,70,25,52],[90,84,41,55]]],
+              5:[[[108,76,30,24],[110,43,25,7],[92,81,55,22],[81,33,28,13],[120,99,73,15]],
+                [[49,25,21,22],[60,51,41,22],[103,76,64,28],[95,70,62,25],[111,49,26,17]],
+                [[88,54,39,25],[94,54,36,27],[87,77,43,21],[100,80,72,20],[83,40,36,24]],
+                [[90,70,63,16],[84,78,28,28],[94,85,39,20],[80,76,54,23],[69,50,45,31]],
+                [[74,63,61,22],[71,60,25,12],[106,80,59,25],[109,76,42,24],[118,56,22,11]]],
+              8:[[[108,76,30,24],[110,43,25,9],[92,81,55,8],[81,33,28,11],[120,99,73,11],[111,70,48,10],[98,72,46,12],[95,66,31,9]],
+                [[97,81,27,10],[102,78,39,20],[113,46,36,18],[66,50,42,21],[101,30,26,16],[100,56,35,17],[91,50,40,22],[106,61,56,19]],
+                [[88,54,39,16],[94,54,36,14],[87,77,43,20],[100,80,72,16],[83,40,36,6],[91,54,22,15],[109,58,54,17],[94,55,30,9]],
+                [[49,25,21,16],[60,51,41,8],[103,76,64,16],[95,70,62,18],[111,49,26,18],[85,84,72,16],[48,36,31,17],[86,76,38,6]],
+                [[113,92,33,23],[52,37,28,22],[57,33,29,26],[99,37,30,17],[92,64,33,23],[119,59,39,26],[54,52,49,18],[75,45,35,30]]],
+              10:[[[49,25,21,13],[60,51,41,9],[103,76,64,11],[95,70,62,14],[111,49,26,13],[85,84,72,16],[48,36,31,12],[86,66,38,11],[71,48,47,16],[90,43,33,8]],
+                [[97,81,27,8],[102,78,39,16],[113,46,36,12],[66,50,42,12],[101,30,26,18],[100,56,35,13],[91,50,40,14],[106,61,56,17],[103,63,58,12],[75,57,41,13]],
+                [[86,84,45,18],[81,45,34,19],[70,54,37,13],[71,61,52,16],[78,73,40,10],[69,63,46,13],[72,67,56,10],[75,75,36,8],[94,88,50,12],[65,51,50,13]],
+                [[113,92,33,15],[52,37,28,17],[57,33,29,17],[99,37,30,19],[92,64,33,13],[119,59,39,19],[54,52,49,13],[75,45,35,21],[79,68,44,13],[116,49,47,22]],
+                [[118,79,51,16],[86,32,31,8],[64,58,52,14],[42,42,32,14],[64,55,43,16],[84,70,35,10],[76,57,36,14],[95,60,55,14],[80,66,52,14],[109,73,23,18]]],
+              15:[[[98,73,44,6],[60,60,38,7],[105,73,60,10],[90,77,52,3],[66,58,24,5],[106,76,55,10],[55,44,36,12],[82,58,23,7],[74,61,58,6],[81,39,24,8],[71,65,39,11],[105,97,47,4],[114,97,69,5],[103,78,55,6],[93,66,55,6]],
+                [[108,76,30,12],[110,43,25,12],[92,81,55,6],[81,33,28,9],[120,99,73,5],[111,70,48,12],[98,72,46,9],[95,66,31,10],[85,84,30,8],[71,32,25,3],[36,34,25,10],[97,67,62,7],[33,25,23,7],[95,27,26,10],[94,81,44,9]],
+                [[49,25,21,13],[60,51,41,9],[103,76,64,8],[95,70,62,6],[111,49,26,10],[74,42,40,4],[85,84,72,110],[48,36,31,10],[86,76,38,12],[71,48,47,14],[90,43,33,9],[98,52,44,9],[73,37,23,10],[61,48,39,14],[75,75,63,11]],
+                [[97,81,27,6],[102,78,39,6],[113,46,36,15],[66,50,42,8],[101,30,26,6],[100,56,35,7],[91,50,40,12],[106,61,56,10],[103,63,58,8],[75,57,41,11],[71,68,64,6],[85,67,39,14],[97,63,56,9],[61,48,30,11],[80,54,35,9]],
+                [[113,92,33,8],[52,37,28,12],[57,33,29,5],[99,37,30,12],[92,64,33,9],[119,59,39,12],[54,52,49,8],[75,45,35,6],[79,68,44,12],[116,49,47,9],[83,44,23,11],[98,96,56,10],[78,72,57,8],[98,88,47,9],[41,33,31,13]]]}
+
+    xscale = 587
+    yscale = 233
+    zscale = 220
+    total_v = xscale * yscale * zscale
+    for key, num_BoxSet in BoxSet.items():
+        for kind_num in range(len(num_BoxSet)):
+            plot_path = "./plot/" + str(key) + "_" + str(kind_num) + ".png"
+            total_count = total_count + 1
+            start_time = time.time()
+            SolutionQ, SolutionD, SolutionV, SolutionPosition, SolutionPlacedBox = packing(num_BoxSet[kind_num], xscale, yscale, zscale)
+            end_time = time.time()
+            total_time += end_time - start_time
+            print("该场景下的空间利用率为:{}".format(SolutionV/total_v))
+            with open('./record/' + str(key) + '_' + str(kind_num) +'.txt', 'a') as f:
+                timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+                f.write('Time: %s, Continue_Time: %s, Acc: %s \n' % (timestamp, end_time - start_time, SolutionV/total_v))
+            # 画图展示每个场景的结果 并保存为图片
+            make_pic([transformtoplot((0,0,0), (xscale, yscale, zscale), 'black')], plot_path)   # 画出大箱子
+            show = []
+            for i in range(len(SolutionPlacedBox)):
+                show.append(transformtoplot(SolutionPosition[i],edge(SolutionQ[SolutionPlacedBox[i]],
+                                                                     SolutionD[SolutionPlacedBox[i]], num_BoxSet[kind_num]),color_list[SolutionQ[SolutionPlacedBox[i]]-1]))
+                make_pic(show, plot_path)
+
+    time_avg = total_time / total_count
+    print("算法平均执行用时为:{}".format(time_avg))
